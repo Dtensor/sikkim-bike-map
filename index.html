@@ -53,6 +53,15 @@
   .ctrl button{width:34px; height:34px; border-radius:8px; border:1px solid var(--line); background:#fff;
     font-size:18px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,.08);}
   .ctrl button:hover{background:#f3f4f6;}
+  .ctrl button.active{background:#dbeafe; border-color:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,.25);}
+  .me-acc{fill:#3b82f6; fill-opacity:.10; stroke:#3b82f6; stroke-opacity:.4; stroke-dasharray:5 4;}
+  .me-dot{fill:#2563eb; stroke:#fff; stroke-width:2.5;}
+  .me-label{font-size:11px; font-weight:800; fill:#1d4ed8; paint-order:stroke; stroke:#fff; stroke-width:3px;}
+  #locstatus{position:absolute; bottom:14px; right:14px; background:rgba(255,255,255,.95); border:1px solid var(--line);
+    border-radius:8px; padding:7px 12px; font-size:12px; color:var(--ink); z-index:10; max-width:340px; line-height:1.5;
+    box-shadow:0 2px 8px rgba(0,0,0,.08); display:none;}
+  #locstatus b{color:#1d4ed8;}
+  #locstatus .warn{color:#b45309;}
   .scalebox{position:absolute; bottom:14px; left:14px; background:rgba(255,255,255,.9); border:1px solid var(--line);
     border-radius:8px; padding:6px 12px; font-size:12px; color:var(--muted); z-index:10;}
   /* SVG element styles */
@@ -91,7 +100,9 @@
       <button id="zin" title="Zoom in">+</button>
       <button id="zout" title="Zoom out">−</button>
       <button id="zreset" title="Reset view">⌂</button>
+      <button id="locate" title="Show my live location on the map">📍</button>
     </div>
+    <div id="locstatus"></div>
     <div class="scalebox">Schematic map — positions true to geography, not to scale · drag to pan · scroll to zoom</div>
   </div>
 
@@ -458,6 +469,91 @@ document.getElementById("zreset").onclick=()=>{vb={x:0,y:0,w:W,h:H}; applyVB();}
     chip.innerHTML=`${N[a].n.split(" ")[0]} → ${N[b].n.split(" ")[0].replace("◉","").replace("▲","")} <b>${dij(a,b)} km</b>`;
     box.appendChild(chip);
   });
+})();
+
+/* ---------------- Phase 1: live location ---------------- */
+(function(){
+  const btn=document.getElementById("locate");
+  const status=document.getElementById("locstatus");
+  const meG=g("g",{id:"me",style:"display:none"});
+  const acc=g("circle",{class:"me-acc",r:0});
+  const pulse=g("circle",{fill:"none",stroke:"#2563eb","stroke-width":2,r:9,opacity:.8});
+  const pa=g("animate",{attributeName:"r",from:"9",to:"26",dur:"1.6s",repeatCount:"indefinite"});
+  const po=g("animate",{attributeName:"opacity",from:"0.8",to:"0",dur:"1.6s",repeatCount:"indefinite"});
+  pulse.appendChild(pa); pulse.appendChild(po);
+  const dot=g("circle",{class:"me-dot",r:7});
+  const mlab=g("text",{class:"me-label",x:12,y:4}); mlab.textContent="YOU";
+  meG.appendChild(acc); meG.appendChild(pulse); meG.appendChild(dot); meG.appendChild(mlab);
+  root.appendChild(meG);
+
+  /* canvas px per metre (latitude scale) — for the accuracy ring */
+  const PX_PER_M = ((H-2*PAD)/(LAT0-LAT1))/111320;
+  const R2=Math.PI/180;
+  function havKm(la1,lo1,la2,lo2){
+    const a=Math.sin((la2-la1)*R2/2)**2 + Math.cos(la1*R2)*Math.cos(la2*R2)*Math.sin((lo2-lo1)*R2/2)**2;
+    return 6371*2*Math.asin(Math.sqrt(a));
+  }
+  function nearestTown(la,lo){
+    let best=null,bd=1e9;
+    for(const id in N){ const d=havKm(la,lo,N[id].la,N[id].lo); if(d<bd){bd=d;best=N[id];} }
+    return {town:best,km:bd};
+  }
+
+  let watchId=null, lastFix=null, ageTimer=null;
+
+  function render(fix){
+    const {latitude:la,longitude:lo,accuracy:am,altitude:alt}=fix.coords;
+    let x=px(lo), y=py(la), off=false;
+    if(x<PAD||x>W-PAD||y<PAD||y>H-PAD){ off=true;
+      x=Math.max(PAD,Math.min(W-PAD,x)); y=Math.max(PAD,Math.min(H-PAD,y)); }
+    meG.style.display="";
+    [acc,pulse,dot].forEach(c=>{c.setAttribute("cx",x); c.setAttribute("cy",y);});
+    mlab.setAttribute("x",x+12); mlab.setAttribute("y",y+4);
+    acc.setAttribute("r", off?0:Math.max(0,Math.min(120,(am||0)*PX_PER_M)));
+    const nt=nearestTown(la,lo);
+    const parts=[`<b>${la.toFixed(4)}, ${lo.toFixed(4)}</b>`, `±${Math.round(am||0)} m`];
+    if(alt!=null) parts.push(`alt ${Math.round(alt)} m`);
+    parts.push(`${nt.km<1?(nt.km*1000).toFixed(0)+" m":nt.km.toFixed(1)+" km"} from ${nt.town.n.replace(/[◉▲✈]/g,"").trim()}`);
+    if(off) parts.push(`<span class="warn">outside map area — dot pinned to edge</span>`);
+    lastFix={t:Date.now(), html:parts.join(" · ")};
+    tick();
+    /* follow-me: keep the view centred, preserve zoom */
+    if(!off){ vb.x=x-vb.w/2; vb.y=y-vb.h/2; applyVB(); }
+  }
+  function tick(){
+    if(!lastFix) return;
+    const s=Math.round((Date.now()-lastFix.t)/1000);
+    const age = s<3?"live":s<60?`${s}s ago`:`${Math.round(s/60)} min ago`;
+    status.innerHTML=`📍 ${lastFix.html} · <span style="color:${s>60?'#b45309':'#059669'}">${age}</span>`;
+    dot.setAttribute("fill-opacity", s>120?0.45:1);
+  }
+  function fail(err){
+    const msg={1:"Location permission denied — allow it in the browser/site settings.",
+               2:"Position unavailable (no GPS/Wi-Fi fix).",
+               3:"Location request timed out — retrying on next fix."}[err.code]||err.message;
+    status.style.display="block";
+    status.innerHTML=`📍 <span class="warn">${msg}</span>`;
+  }
+  function start(){
+    if(!navigator.geolocation){ status.style.display="block";
+      status.innerHTML='📍 <span class="warn">This browser has no geolocation support.</span>'; return; }
+    if(location.protocol==="file:"){ status.style.display="block";
+      status.innerHTML='📍 <span class="warn">Live location needs HTTPS — open the GitHub Pages URL instead of the local file.</span>'; return; }
+    btn.classList.add("active");
+    status.style.display="block";
+    status.textContent="📍 waiting for GPS fix…";
+    watchId=navigator.geolocation.watchPosition(render,fail,{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+    ageTimer=setInterval(tick,5000);
+  }
+  function stop(){
+    if(watchId!=null) navigator.geolocation.clearWatch(watchId);
+    clearInterval(ageTimer);
+    watchId=null; lastFix=null;
+    btn.classList.remove("active");
+    meG.style.display="none";
+    status.style.display="none";
+  }
+  btn.addEventListener("click",()=>{ watchId==null?start():stop(); });
 })();
 </script>
 </body>
