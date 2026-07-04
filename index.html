@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sikkim &amp; Kalimpong — Biker's Road Atlas</title>
+<style>
+  :root{
+    --nh:#e8590c; --sh:#1971c2; --dr:#2f9e44; --track:#c92a2a;
+    --ink:#1f2937; --muted:#6b7280; --paper:#fdfcf8; --card:#ffffff;
+    --line:#e5e7eb; --accent:#7c3aed;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{font-family:"Avenir Next","Segoe UI",system-ui,sans-serif; background:var(--paper); color:var(--ink);}
+  header{padding:28px 32px 12px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#f0f7ff 0%, var(--paper) 100%);}
+  header h1{font-size:26px; letter-spacing:.5px;}
+  header h1 span{color:var(--nh);}
+  header p{color:var(--muted); margin-top:6px; max-width:900px; font-size:14px; line-height:1.5;}
+  .layout{display:flex; gap:0; align-items:stretch;}
+  .mapwrap{flex:1 1 auto; position:relative; min-width:0;}
+  #mapbox{width:100%; height:calc(100vh - 118px); min-height:640px; cursor:grab; background:
+    linear-gradient(180deg,#eef6ff 0%, #f3f9f0 45%, #fbf7ee 100%);}
+  #mapbox:active{cursor:grabbing;}
+  .side{width:340px; flex:0 0 340px; border-left:1px solid var(--line); background:var(--card);
+    height:calc(100vh - 118px); overflow-y:auto; padding:16px;}
+  .side h2{font-size:14px; text-transform:uppercase; letter-spacing:1.2px; color:var(--muted); margin:18px 0 8px;}
+  .side h2:first-child{margin-top:0;}
+  .legend-item{display:flex; align-items:center; gap:10px; padding:5px 4px; font-size:13.5px; cursor:pointer; border-radius:6px;}
+  .legend-item:hover{background:#f3f4f6;}
+  .legend-item input{accent-color:var(--accent);}
+  .swatch{width:34px; height:0; border-top-width:4px; border-top-style:solid; border-radius:2px;}
+  .swatch.nh{border-color:var(--nh); border-top-width:6px;}
+  .swatch.sh{border-color:var(--sh); border-top-width:4px;}
+  .swatch.dr{border-color:var(--dr); border-top-width:3px;}
+  .swatch.track{border-color:var(--track); border-top-style:dashed;}
+  .chips{display:flex; flex-wrap:wrap; gap:6px; font-size:12px;}
+  .chip{background:#f3f4f6; border:1px solid var(--line); border-radius:999px; padding:3px 10px;}
+  .chip b{color:var(--nh);}
+  .route-card{border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px;
+    padding:10px 12px; margin:8px 0; background:#fbfaff;}
+  .route-card h3{font-size:13.5px; margin-bottom:4px;}
+  .route-card p{font-size:12.5px; color:var(--muted); line-height:1.5;}
+  .route-card .km{float:right; font-weight:700; color:var(--accent); font-size:12px;}
+  .note{font-size:12.5px; line-height:1.55; color:#4b5563; background:#fff8e6; border:1px solid #fde68a;
+    border-radius:8px; padding:10px 12px; margin-top:6px;}
+  .note b{color:#92400e;}
+  #tooltip{position:absolute; pointer-events:none; background:#111827; color:#f9fafb; font-size:12.5px;
+    padding:8px 11px; border-radius:8px; max-width:280px; line-height:1.5; opacity:0; transition:opacity .12s;
+    z-index:20; box-shadow:0 6px 20px rgba(0,0,0,.25);}
+  #tooltip .t-title{font-weight:700; margin-bottom:2px;}
+  #tooltip .t-sub{color:#d1d5db;}
+  .ctrl{position:absolute; top:14px; left:14px; display:flex; flex-direction:column; gap:6px; z-index:10;}
+  .ctrl button{width:34px; height:34px; border-radius:8px; border:1px solid var(--line); background:#fff;
+    font-size:18px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,.08);}
+  .ctrl button:hover{background:#f3f4f6;}
+  .scalebox{position:absolute; bottom:14px; left:14px; background:rgba(255,255,255,.9); border:1px solid var(--line);
+    border-radius:8px; padding:6px 12px; font-size:12px; color:var(--muted); z-index:10;}
+  /* SVG element styles */
+  .road{fill:none; stroke-linecap:round; cursor:pointer;}
+  .road.dim{opacity:.08; pointer-events:none;}
+  .road-halo{fill:none; stroke:#fff; stroke-linecap:round; opacity:.85;}
+  .road:hover{filter:drop-shadow(0 0 3px rgba(0,0,0,.5));}
+  .kmlabel{font-size:10.5px; fill:#374151; font-weight:700; paint-order:stroke; stroke:#ffffff; stroke-width:3px; pointer-events:none;}
+  .town-dot{stroke:#fff; stroke-width:1.6;}
+  .town-label{font-size:12px; font-weight:600; fill:#111827; paint-order:stroke; stroke:#ffffff; stroke-width:3.5px; pointer-events:none;}
+  .town-label.minor{font-size:10.5px; font-weight:500; fill:#374151;}
+  .town-label.hub{font-size:14px; font-weight:800;}
+  .peak-label{font-size:11px; fill:#64748b; font-style:italic; paint-order:stroke; stroke:#fff; stroke-width:3px;}
+  .river{fill:none; stroke:#93c5fd; stroke-width:5; opacity:.55; stroke-linecap:round;}
+  .zone{opacity:.5;}
+  .zone-label{font-size:11px; font-weight:700; letter-spacing:1.5px; fill:#9ca3af; text-transform:uppercase;}
+  .badge{font-size:9px; font-weight:800; paint-order:stroke; stroke:#fff; stroke-width:2.5px;}
+  footer{padding:10px 32px; font-size:11.5px; color:var(--muted); border-top:1px solid var(--line);}
+  @media (max-width:900px){ .layout{flex-direction:column;} .side{width:100%; flex:auto; height:auto;} #mapbox{height:70vh;} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SIKKIM <span>&amp;</span> KALIMPONG — Biker's Road Atlas</h1>
+  <p>Every rideable corridor from the Teesta valley to Gurudongmar, colour-coded by road class, with segment distances in km.
+     Hover any road for condition notes; hover any town for altitude, fuel and permit info. Base: <b>Kalimpong</b>.
+     Distances are riding-approximate (±10%) — mountain roads shift with every monsoon.</p>
+</header>
+
+<div class="layout">
+  <div class="mapwrap">
+    <svg id="mapbox" viewBox="0 0 1400 1580" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="tooltip"></div>
+    <div class="ctrl">
+      <button id="zin" title="Zoom in">+</button>
+      <button id="zout" title="Zoom out">−</button>
+      <button id="zreset" title="Reset view">⌂</button>
+    </div>
+    <div class="scalebox">Schematic map — positions true to geography, not to scale · drag to pan · scroll to zoom</div>
+  </div>
+
+  <aside class="side">
+    <h2>Road classes (click to filter)</h2>
+    <label class="legend-item"><input type="checkbox" checked data-cls="nh"><span class="swatch nh"></span> National Highway (2-lane, tarmac)</label>
+    <label class="legend-item"><input type="checkbox" checked data-cls="sh"><span class="swatch sh"></span> State Highway (1.5-lane, mostly good)</label>
+    <label class="legend-item"><input type="checkbox" checked data-cls="dr"><span class="swatch dr"></span> District / village road (narrow, patchy)</label>
+    <label class="legend-item"><input type="checkbox" checked data-cls="track"><span class="swatch track"></span> High-altitude track (broken, 4x4/ADV)</label>
+
+    <h2>Map symbols</h2>
+    <div class="chips">
+      <chip class="chip">⛽ fuel pump</chip>
+      <chip class="chip">🛂 permit checkpoint</chip>
+      <chip class="chip">▲ pass / high point</chip>
+      <chip class="chip">◉ lake</chip>
+      <chip class="chip"><b>bold</b> = major hub</chip>
+    </div>
+
+    <h2>Signature rides from Kalimpong</h2>
+    <div class="route-card"><span class="km">~210 km loop</span><h3>1 · Old Silk Route</h3>
+      <p>Kalimpong → Algarah → Pedong → Rhenock → Rongli 🛂 → Zuluk (32 hairpins) → Thambi → Nathang → Kupup → Tsomgo → Gangtok. The greatest hairpin stack in the East Himalaya.</p></div>
+    <div class="route-card"><span class="km">~450 km, 4–5 days</span><h3>2 · North Sikkim Grand Tour</h3>
+      <p>Kalimpong → Gangtok → Mangan ⛽ (last reliable fuel) → Chungthang → split: Lachen–Gurudongmar (5,183 m) and Lachung–Yumthang–Zero Point. Carry spare fuel from Mangan.</p></div>
+    <div class="route-card"><span class="km">~280 km loop</span><h3>3 · West Sikkim Monastery Loop</h3>
+      <p>Kalimpong → Melli → Jorethang → Namchi (Char Dham) → Ravangla (Buddha Park) → Legship → Pelling (Pemayangtse) → Dentam → Uttarey, return via Tashiding–Yuksom side trip.</p></div>
+    <div class="route-card"><span class="km">~120 km loop</span><h3>4 · Kalimpong Hill Circuit</h3>
+      <p>Kalimpong → Lava → Loleygaon (Canopy Walk) → back via Algarah; add Gorubathan descent to the Dooars if you want a fast riverside run home along NH10.</p></div>
+    <div class="route-card"><span class="km">~110 km</span><h3>5 · Nathu La Dash</h3>
+      <p>Gangtok → Tsomgo Lake ◉ → Nathu La (4,310 m, Indo-China border) 🛂. Permit issued in Gangtok only; closed Mon–Tue; Indians only.</p></div>
+
+    <h2>Permits &amp; ground rules</h2>
+    <div class="note">
+      <b>Restricted zones (shaded on map):</b> everything beyond Rongli (East / Silk Route) and beyond Mangan (North) needs a
+      <b>Protected Area Permit</b> — arranged in a day via any Gangtok/Rongli tour agent; personal bikes allowed on Silk Route &amp;
+      North Sikkim, but <b>Gurudongmar &amp; Nathu La often require a registered local vehicle/guide — verify current rules in Gangtok</b>.
+      Foreign nationals: North &amp; East Sikkim need PAP in groups of 2+; Nathu La is off-limits.
+    </div>
+    <div class="note">
+      <b>Fuel discipline:</b> reliable pumps at Kalimpong, Melli, Rangpo, Singtam, Gangtok, Jorethang, Namchi, Ravangla, Gyalshing, Mangan, Rongli.
+      <b>Nothing after Mangan (north) or Rongli (east).</b> Gurudongmar round trip from Lachen ≈ 135 km — carry 5 L spare.
+    </div>
+    <div class="note">
+      <b>Season:</b> Mar–May &amp; Oct–Dec best. Monsoon (Jun–Sep) = landslides on NH10 and Mangan–Chungthang. Dec–Feb: snow above 3,000 m; Zero Point &amp; Gurudongmar may shut. Start riding by 7 am — mountain fog owns the afternoons.
+    </div>
+
+    <h2>Hub-to-hub quick distances</h2>
+    <div class="chips" id="quickdist"></div>
+  </aside>
+</div>
+
+<footer>
+  Hand-built schematic atlas · road classes per Sikkim PWD / MoRTH designations (NH10, NH310, NH510, NH710 corridors) ·
+  distances compiled from odometer-typical figures, treat as planning estimates · always check landslide status at BRO gates before high routes.
+</footer>
+
+<script>
+/* ---------------- data ---------------- */
+/* project real lat/lon into the 1400x1580 canvas */
+const LON0=88.00, LON1=88.95, LAT0=28.10, LAT1=26.65;
+const W=1400, H=1580, PAD=50;
+const px = lon => PAD + (lon-LON0)/(LON1-LON0)*(W-2*PAD);
+const py = lat => PAD + (LAT0-lat)/(LAT0-LAT1)*(H-2*PAD);
+
+/* nodes: id,name,lat,lon,type(hub|town|minor|pass|lake|point),elev(m),fuel,permit */
+const N = {
+  siliguri:{n:"Siliguri",la:26.72,lo:88.43,t:"hub",e:120,f:1},
+  sevoke:{n:"Sevoke (Coronation Br.)",la:26.90,lo:88.47,t:"minor",e:180},
+  gorubathan:{n:"Gorubathan",la:26.96,lo:88.70,t:"minor",e:300},
+  teesta:{n:"Teesta Bazaar",la:27.08,lo:88.43,t:"town",e:230},
+  darjeeling:{n:"Darjeeling",la:27.04,lo:88.26,t:"town",e:2040,f:1},
+  kalimpong:{n:"KALIMPONG",la:27.06,lo:88.47,t:"hub",e:1250,f:1},
+  lava:{n:"Lava",la:27.09,lo:88.66,t:"town",e:2130},
+  loleygaon:{n:"Loleygaon",la:27.03,lo:88.62,t:"minor",e:1670},
+  algarah:{n:"Algarah",la:27.10,lo:88.55,t:"minor",e:1800},
+  pedong:{n:"Pedong",la:27.15,lo:88.61,t:"town",e:1240},
+  melli:{n:"Melli",la:27.09,lo:88.44,t:"town",e:210,f:1},
+  rangpo:{n:"Rangpo",la:27.18,lo:88.53,t:"town",e:300,f:1,p:1},
+  singtam:{n:"Singtam",la:27.23,lo:88.50,t:"town",e:320,f:1},
+  ranipool:{n:"Ranipool",la:27.29,lo:88.59,t:"minor",e:850},
+  gangtok:{n:"GANGTOK",la:27.33,lo:88.61,t:"hub",e:1650,f:1,p:1},
+  pakyong:{n:"Pakyong ✈",la:27.23,lo:88.59,t:"town",e:1400},
+  rorathang:{n:"Rorathang",la:27.20,lo:88.65,t:"minor",e:400},
+  rhenock:{n:"Rhenock",la:27.17,lo:88.63,t:"town",e:900},
+  rongli:{n:"Rongli",la:27.22,lo:88.69,t:"town",e:800,f:1,p:1},
+  aritar:{n:"Aritar Lake",la:27.19,lo:88.70,t:"lake",e:1500},
+  zuluk:{n:"Zuluk",la:27.25,lo:88.78,t:"town",e:2865},
+  nathang:{n:"Nathang Valley",la:27.29,lo:88.80,t:"town",e:4115},
+  kupup:{n:"Kupup ◉",la:27.34,lo:88.83,t:"lake",e:4200},
+  nathula:{n:"NATHU LA ▲",la:27.39,lo:88.84,t:"pass",e:4310,p:1},
+  tsomgo:{n:"Tsomgo Lake ◉",la:27.37,lo:88.76,t:"lake",e:3750,p:1},
+  jorethang:{n:"Jorethang",la:27.11,lo:88.32,t:"town",e:300,f:1},
+  namchi:{n:"Namchi",la:27.17,lo:88.36,t:"town",e:1315,f:1},
+  temi:{n:"Temi Tea Garden",la:27.24,lo:88.43,t:"minor",e:1500},
+  ravangla:{n:"Ravangla",la:27.31,lo:88.36,t:"town",e:2135,f:1},
+  legship:{n:"Legship",la:27.28,lo:88.27,t:"minor",e:450},
+  gyalshing:{n:"Gyalshing",la:27.29,lo:88.26,t:"town",e:900,f:1},
+  pelling:{n:"Pelling",la:27.30,lo:88.24,t:"town",e:2085},
+  dentam:{n:"Dentam",la:27.27,lo:88.18,t:"minor",e:1500},
+  uttarey:{n:"Uttarey",la:27.28,lo:88.10,t:"town",e:2000},
+  rinchenpong:{n:"Rinchenpong/Kaluk",la:27.22,lo:88.17,t:"minor",e:1700},
+  soreng:{n:"Soreng",la:27.16,lo:88.19,t:"minor",e:1400},
+  sombaria:{n:"Sombaria",la:27.12,lo:88.13,t:"minor",e:1100},
+  tashiding:{n:"Tashiding",la:27.31,lo:88.30,t:"town",e:1400},
+  yuksom:{n:"Yuksom",la:27.37,lo:88.22,t:"town",e:1780},
+  dikchu:{n:"Dikchu",la:27.38,lo:88.51,t:"minor",e:600},
+  kabi:{n:"Kabi Lungchok",la:27.42,lo:88.60,t:"minor",e:1700},
+  phodong:{n:"Phodong",la:27.47,lo:88.58,t:"town",e:1500},
+  mangan:{n:"Mangan",la:27.51,lo:88.53,t:"town",e:960,f:1,p:1},
+  dzongu:{n:"Dzongu (Lingthem)",la:27.55,lo:88.47,t:"minor",e:1200,p:1},
+  chungthang:{n:"Chungthang",la:27.60,lo:88.64,t:"town",e:1580},
+  lachen:{n:"Lachen",la:27.72,lo:88.55,t:"town",e:2750},
+  thangu:{n:"Thangu",la:27.90,lo:88.53,t:"minor",e:3960},
+  gurudongmar:{n:"GURUDONGMAR ◉",la:28.02,lo:88.71,t:"lake",e:5183},
+  lachung:{n:"Lachung",la:27.69,lo:88.74,t:"town",e:2700},
+  yumthang:{n:"Yumthang Valley",la:27.82,lo:88.70,t:"point",e:3560},
+  zeropoint:{n:"Zero Point",la:27.90,lo:88.74,t:"point",e:4720},
+};
+
+/* edges: [a,b,km,class,note]  class: nh|sh|dr|track */
+const E = [
+  ["siliguri","sevoke",22,"nh","NH10 · flat, fast, elephant-crossing zone in Mahananda forest"],
+  ["sevoke","teesta",38,"nh","NH10 · riverside sweepers along the Teesta gorge; landslide-prone Jun–Sep"],
+  ["teesta","melli",11,"nh","NH10 · easy river-grade tarmac"],
+  ["melli","rangpo",14,"nh","NH10 · river-grade; Rangpo = Sikkim border check (carry ID)"],
+  ["rangpo","singtam",15,"nh","NH10 · good 2-lane along Teesta"],
+  ["singtam","ranipool",14,"nh","NH10 · climbing starts; traffic thickens near Gangtok"],
+  ["ranipool","gangtok",10,"nh","NH10 · urban climb, watch taxis"],
+  ["gangtok","tsomgo",38,"nh","NH310 (JN road) · steady 2,100 m climb; permit checked at 3rd Mile"],
+  ["tsomgo","nathula",18,"nh","NH310 · high-altitude tarmac to the border gate; closed Mon–Tue"],
+  ["kalimpong","teesta",16,"sh","Steep 1,000 m descent, 14 hairpins; brake-fade check"],
+  ["kalimpong","algarah",14,"sh","Ridge road, cardamom forest, usually good surface"],
+  ["algarah","pedong",7,"sh","Rolling ridge tarmac"],
+  ["pedong","rhenock",14,"dr","Descent into Sikkim via Rishi Khola border bridge; narrow"],
+  ["rhenock","rongli",11,"dr","Valley road, patchy after rains"],
+  ["rongli","aritar",10,"dr","Side spur to Lampokhari lake; steep concrete stretches"],
+  ["rongli","zuluk",27,"sh","Silk Route climb begins · 32-hairpin wall above Padamchen; permit from Rongli"],
+  ["zuluk","nathang",23,"track","Thambi viewpoint hairpins → open tundra; broken patches, ice before 9 am in winter"],
+  ["nathang","kupup",10,"track","Above 4,000 m plateau; weather turns in minutes"],
+  ["kupup","tsomgo",20,"track","Past Elephant Lake &amp; Baba Mandir; army convoys have right of way"],
+  ["rangpo","rorathang",13,"sh","Rorathang industrial valley road"],
+  ["rorathang","rongli",12,"sh","River-grade, decent tarmac"],
+  ["rorathang","pakyong",15,"dr","Climb to the airport shelf; narrow village road"],
+  ["pakyong","ranipool",20,"sh","Airport highway link, good surface"],
+  ["melli","jorethang",17,"sh","Rangit valley river run; hot in summer"],
+  ["jorethang","namchi",10,"sh","Sharp 1,000 m climb, well-paved"],
+  ["namchi","ravangla",26,"sh","Via Damthang ridge; forest sweepers, fog after noon"],
+  ["ravangla","temi",15,"sh","Drops through Temi Tea Garden — Sikkim's only estate; photogenic"],
+  ["temi","singtam",18,"sh","Continues down to the Teesta at Singtam"],
+  ["namchi","rangpo",34,"dr","Namthang back-road; quiet, patchy, great valley views"],
+  ["jorethang","legship",26,"sh","Rangit gorge road; rockfall zones marked"],
+  ["legship","gyalshing",9,"sh","Short valley climb"],
+  ["gyalshing","pelling",9,"sh","Climb to the Kanchenjunga balcony; Pemayangtse turn-off midway"],
+  ["pelling","dentam",13,"dr","Ridge descent, narrow but scenic"],
+  ["dentam","uttarey",20,"dr","Last village before Singalila; rough final 5 km"],
+  ["legship","tashiding",17,"dr","Sacred hill road; steep concrete ramps"],
+  ["tashiding","yuksom",19,"dr","Forest road to the first capital; broken patches"],
+  ["pelling","yuksom",32,"dr","Via Rimbi falls &amp; Khecheopalri turn-off (lake +10 km side trip)"],
+  ["ravangla","legship",24,"sh","Via Kewzing; smooth, quiet monastery country"],
+  ["gyalshing","rinchenpong",14,"dr","Kaluk/Rinchenpong heritage ridge"],
+  ["rinchenpong","soreng",12,"dr","Quiet district road"],
+  ["soreng","sombaria",8,"dr","Ridge villages"],
+  ["sombaria","jorethang",22,"dr","Long descent back to the Rangit"],
+  ["dentam","sombaria",14,"dr","Hee-Bermiok traverse; very quiet"],
+  ["gangtok","kabi",17,"nh","NH510 north · decent hill tarmac"],
+  ["kabi","phodong",21,"nh","NH510 · monastery turn-offs; occasional slips"],
+  ["phodong","mangan",27,"nh","NH510 · drops to the Teesta; LAST FUEL for the north at Mangan"],
+  ["mangan","chungthang",29,"sh","Slide-prone gorge (Toong–Naga zone); expect BRO one-way gates"],
+  ["chungthang","lachen",26,"sh","Climbs the Lachen chu; surface varies year to year"],
+  ["lachen","thangu",30,"track","Steep, broken, breathtaking; acclimatise in Lachen first"],
+  ["thangu","gurudongmar",37,"track","High plateau dirt to 5,183 m — army checkpost; back by noon (winds)"],
+  ["chungthang","lachung",22,"sh","Waterfall alley; decent tarmac most seasons"],
+  ["lachung","yumthang",25,"sh","Rhododendron sanctuary road (Apr–May bloom)"],
+  ["yumthang","zeropoint",15,"track","Broken switchbacks to the snowline; often shut Dec–Mar"],
+  ["singtam","dikchu",26,"sh","Teesta left-bank alternative to North Sikkim; quieter than NH"],
+  ["dikchu","mangan",19,"sh","Joins NH510 below Mangan"],
+  ["gangtok","dikchu",22,"dr","Via Penlong ridge; steep shortcut"],
+  ["mangan","dzongu",15,"dr","Lepcha reserve — separate Dzongu permit; hanging bridge country"],
+  ["kalimpong","lava",32,"sh","Classic forest climb through Neora Valley fringe"],
+  ["lava","loleygaon",24,"dr","Heritage forest road; slippery moss in monsoon"],
+  ["loleygaon","kalimpong",26,"dr","Return ridge road via Kafer; narrow"],
+  ["lava","gorubathan",28,"sh","Big 1,800 m descent to the Dooars tea plains"],
+  ["gorubathan","sevoke",42,"sh","Dooars tea-garden run; fast &amp; flat, watch cattle"],
+  ["teesta","darjeeling",45,"sh","Via Peshok &amp; Lopchu tea ridge; Darjeeling detour"],
+  ["jorethang","darjeeling",35,"sh","Singla climb — 1,700 m of hairpins; steepest paved climb in the region"],
+];
+
+/* rivers (decorative): list of [lat,lon] way-points */
+const RIVERS = [
+  {name:"Teesta", pts:[[28.0,88.55],[27.72,88.55],[27.60,88.64],[27.51,88.55],[27.38,88.51],[27.23,88.50],[27.18,88.53],[27.09,88.44],[27.00,88.43],[26.90,88.47],[26.75,88.44]]},
+  {name:"Rangit", pts:[[27.31,88.24],[27.24,88.27],[27.15,88.30],[27.11,88.33],[27.09,88.42]]},
+];
+
+/* ---------------- render ---------------- */
+const svg = document.getElementById("mapbox");
+const NSU = "http://www.w3.org/2000/svg";
+const g = (tag,attrs)=>{const el=document.createElementNS(NSU,tag); for(const k in attrs) el.setAttribute(k,attrs[k]); return el;};
+const root = g("g",{id:"root"});
+svg.appendChild(root);
+
+/* permit zones (soft shading) */
+function zone(points, fill, label, lx, ly){
+  const d = points.map((p,i)=>(i?"L":"M")+px(p[1])+","+py(p[0])).join(" ")+" Z";
+  const z=g("path",{d, fill, class:"zone"}); root.appendChild(z);
+  const t=g("text",{x:px(lx), y:py(ly), class:"zone-label"}); t.textContent=label; root.appendChild(t);
+}
+zone([[28.10,88.35],[28.10,88.95],[27.55,88.95],[27.55,88.42],[27.75,88.35]], "#ede9fe", "North Sikkim · PAP zone", 88.62, 27.97);
+zone([[27.47,88.72],[27.47,88.95],[27.18,88.95],[27.18,88.72]], "#fee2e2", "Silk Route / Border · PAP zone", 88.735, 27.455);
+
+/* rivers */
+RIVERS.forEach(r=>{
+  const d=r.pts.map((p,i)=>(i?"L":"M")+px(p[1])+","+py(p[0])).join(" ");
+  root.appendChild(g("path",{d, class:"river"}));
+});
+const rl=g("text",{x:px(88.455),y:py(26.98),class:"peak-label"}); rl.textContent="Teesta ⌇"; root.appendChild(rl);
+const rl2=g("text",{x:px(88.27),y:py(27.135),class:"peak-label"}); rl2.textContent="Rangit ⌇"; root.appendChild(rl2);
+const kj=g("text",{x:px(88.13),y:py(27.62),class:"peak-label"}); kj.textContent="✻ KANGCHENJUNGA 8,586 m (no roads — trek country)"; root.appendChild(kj);
+
+/* roads: draw as gentle curves (quadratic with slight perpendicular bow) */
+const CLS = {
+  nh:{w:6, c:"var(--nh)", dash:""},
+  sh:{w:4, c:"var(--sh)", dash:""},
+  dr:{w:3, c:"var(--dr)", dash:""},
+  track:{w:3.5, c:"var(--track)", dash:"7,6"},
+};
+const tooltip = document.getElementById("tooltip");
+const roadG = g("g",{}); const labelG = g("g",{}); const nodeG = g("g",{});
+root.appendChild(roadG); root.appendChild(labelG); root.appendChild(nodeG);
+
+E.forEach((ed,i)=>{
+  const [a,b,km,cls,note]=ed;
+  const A=N[a], B=N[b];
+  const x1=px(A.lo), y1=py(A.la), x2=px(B.lo), y2=py(B.la);
+  const mx=(x1+x2)/2, my=(y1+y2)/2;
+  const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
+  const bow = Math.min(22, len*0.14) * ((i%2)?1:-1);
+  const cx=mx - dy/len*bow, cy=my + dx/len*bow;
+  const d=`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`;
+  const s=CLS[cls];
+  roadG.appendChild(g("path",{d, class:"road-halo", "stroke-width":s.w+3, "data-cls":cls}));
+  const p=g("path",{d, class:"road", stroke:s.c, "stroke-width":s.w, "data-cls":cls});
+  if(s.dash) p.setAttribute("stroke-dasharray",s.dash);
+  p.addEventListener("mousemove",ev=>showTip(ev, `${A.n.replace(/[A-Z ]+$/,s=>s)} ⇄ ${B.n}`,
+    `<b>${km} km</b> · ${clsName(cls)}<br>${note}`));
+  p.addEventListener("mouseleave",hideTip);
+  roadG.appendChild(p);
+  /* km label at curve midpoint */
+  const lx=0.25*x1+0.5*cx+0.25*x2, ly=0.25*y1+0.5*cy+0.25*y2;
+  const t=g("text",{x:lx, y:ly-4, class:"kmlabel", "text-anchor":"middle", "data-cls":cls});
+  t.textContent=km; labelG.appendChild(t);
+});
+
+function clsName(c){return {nh:"National Highway", sh:"State Highway", dr:"District road", track:"High-altitude track"}[c];}
+
+/* nodes */
+for(const id in N){
+  const d=N[id];
+  const x=px(d.lo), y=py(d.la);
+  const hub = d.t==="hub";
+  const r = hub?9 : d.t==="minor"?4.5 : d.t==="pass"||d.t==="lake"||d.t==="point"?6 : 6.5;
+  const fill = hub?"#7c3aed" : d.t==="pass"?"#c92a2a" : d.t==="lake"?"#0ea5e9" : d.t==="point"?"#0ea5e9" : d.t==="minor"?"#9ca3af":"#111827";
+  const c=g("circle",{cx:x, cy:y, r, fill, class:"town-dot"});
+  c.style.cursor="pointer";
+  c.addEventListener("mousemove",ev=>{
+    let extra="";
+    if(d.f) extra+="⛽ fuel available · ";
+    if(d.p) extra+="🛂 permit/checkpost · ";
+    showTip(ev, d.n, `${extra}altitude <b>${d.e.toLocaleString()} m</b>`);
+  });
+  c.addEventListener("mouseleave",hideTip);
+  nodeG.appendChild(c);
+  const lab=g("text",{x:x+r+4, y:y+4, class:"town-label"+(hub?" hub":d.t==="minor"?" minor":"")});
+  lab.textContent=d.n;
+  nodeG.appendChild(lab);
+  /* fuel / permit badges */
+  let bx=x+r+4+d.n.length*(hub?8.2:d.t==="minor"?5.6:6.6);
+  if(d.f){ const bt=g("text",{x:bx, y:y+4, class:"badge"}); bt.textContent="⛽"; nodeG.appendChild(bt); bx+=13; }
+  if(d.p){ const bt=g("text",{x:bx, y:y+4, class:"badge"}); bt.textContent="🛂"; nodeG.appendChild(bt); }
+}
+
+/* compass */
+const comp=g("g",{transform:`translate(${W-70},90)`});
+comp.appendChild(g("circle",{cx:0,cy:0,r:26,fill:"#fff",stroke:"#d1d5db"}));
+const cn=g("path",{d:"M0,-20 L6,6 L0,2 L-6,6 Z", fill:"#c92a2a"}); comp.appendChild(cn);
+const ct=g("text",{x:0,y:-30,"text-anchor":"middle","font-size":"13","font-weight":"800",fill:"#374151"}); ct.textContent="N"; comp.appendChild(ct);
+root.appendChild(comp);
+
+/* ---------------- tooltip ---------------- */
+function showTip(ev, title, sub){
+  const wrap = svg.parentElement.getBoundingClientRect();
+  tooltip.innerHTML = `<div class="t-title">${title}</div><div class="t-sub">${sub}</div>`;
+  tooltip.style.opacity=1;
+  let tx=ev.clientX-wrap.left+14, ty=ev.clientY-wrap.top+14;
+  if(tx>wrap.width-300) tx-=320; if(ty>wrap.height-90) ty-=110;
+  tooltip.style.left=tx+"px"; tooltip.style.top=ty+"px";
+}
+function hideTip(){ tooltip.style.opacity=0; }
+
+/* ---------------- filters ---------------- */
+document.querySelectorAll(".legend-item input").forEach(cb=>{
+  cb.addEventListener("change",()=>{
+    const cls=cb.dataset.cls, on=cb.checked;
+    document.querySelectorAll(`[data-cls="${cls}"]`).forEach(el=>{
+      if(el.tagName==="text"){ el.style.display=on?"":"none"; }
+      else el.classList.toggle("dim",!on);
+    });
+  });
+});
+
+/* ---------------- pan & zoom ---------------- */
+let vb={x:0,y:0,w:W,h:H};
+function applyVB(){ svg.setAttribute("viewBox",`${vb.x} ${vb.y} ${vb.w} ${vb.h}`); }
+svg.addEventListener("wheel",ev=>{
+  ev.preventDefault();
+  const scale = ev.deltaY>0 ? 1.15 : 0.87;
+  const pt = svgPoint(ev);
+  vb.x = pt.x - (pt.x-vb.x)*scale;
+  vb.y = pt.y - (pt.y-vb.y)*scale;
+  vb.w*=scale; vb.h*=scale;
+  applyVB();
+},{passive:false});
+let drag=null;
+svg.addEventListener("mousedown",ev=>{ drag={x:ev.clientX,y:ev.clientY,vx:vb.x,vy:vb.y}; });
+window.addEventListener("mousemove",ev=>{
+  if(!drag) return;
+  const r=svg.getBoundingClientRect();
+  vb.x=drag.vx-(ev.clientX-drag.x)*vb.w/r.width;
+  vb.y=drag.vy-(ev.clientY-drag.y)*vb.h/r.height;
+  applyVB();
+});
+window.addEventListener("mouseup",()=>drag=null);
+function svgPoint(ev){
+  const r=svg.getBoundingClientRect();
+  return {x:vb.x+(ev.clientX-r.left)/r.width*vb.w, y:vb.y+(ev.clientY-r.top)/r.height*vb.h};
+}
+document.getElementById("zin").onclick=()=>{vb.x+=vb.w*.1; vb.y+=vb.h*.1; vb.w*=.8; vb.h*=.8; applyVB();};
+document.getElementById("zout").onclick=()=>{vb.x-=vb.w*.125; vb.y-=vb.h*.125; vb.w*=1.25; vb.h*=1.25; applyVB();};
+document.getElementById("zreset").onclick=()=>{vb={x:0,y:0,w:W,h:H}; applyVB();};
+
+/* ---------------- quick distances (Dijkstra over the edge list) ---------------- */
+(function(){
+  const adj={};
+  E.forEach(([a,b,km])=>{ (adj[a]=adj[a]||[]).push([b,km]); (adj[b]=adj[b]||[]).push([a,km]); });
+  function dij(src,dst){
+    const dist={}, seen={};
+    for(const k in N) dist[k]=Infinity;
+    dist[src]=0;
+    while(true){
+      let u=null,best=Infinity;
+      for(const k in dist) if(!seen[k]&&dist[k]<best){best=dist[k];u=k;}
+      if(u===null||u===dst) break;
+      seen[u]=1;
+      (adj[u]||[]).forEach(([v,w])=>{ if(dist[u]+w<dist[v]) dist[v]=dist[u]+w; });
+    }
+    return Math.round(dist[dst]);
+  }
+  const pairs=[["kalimpong","gangtok"],["kalimpong","namchi"],["kalimpong","pelling"],["kalimpong","zuluk"],
+    ["gangtok","nathula"],["gangtok","mangan"],["gangtok","lachen"],["lachen","gurudongmar"],
+    ["gangtok","lachung"],["gangtok","pelling"],["namchi","ravangla"],["gangtok","yuksom"]];
+  const box=document.getElementById("quickdist");
+  pairs.forEach(([a,b])=>{
+    const chip=document.createElement("span");
+    chip.className="chip";
+    chip.innerHTML=`${N[a].n.split(" ")[0]} → ${N[b].n.split(" ")[0].replace("◉","").replace("▲","")} <b>${dij(a,b)} km</b>`;
+    box.appendChild(chip);
+  });
+})();
+</script>
+</body>
+</html>
