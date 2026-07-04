@@ -13,11 +13,14 @@
 | Sidebar checkboxes | Hide/show road classes | "Tarmac only" view |
 | Scroll / drag | Zoom and pan | Zooming into the Zuluk hairpins |
 | Tap 📍 button | Shows YOUR live blue dot on the map (asks location permission once) | Mid-ride: "where am I vs the next fuel stop?" |
+| Tap 🏍️ button | Opens a RIDE ROOM — copy the invite link, friends open it, everyone's dots appear | Group rides: "where is everyone?" |
 
 ## One real example
 Friday night: open the page, untick district roads, see the Old Silk Route loop is ~210 km with last fuel at Rongli, screenshot the permit note, ride out Saturday 7 am.
 
 ## What runs automatically
 Once you tap 📍, the map keeps updating your blue dot every few seconds by itself — with an accuracy ring, your altitude, the nearest town and how far it is, and a freshness tag ("live" / "2 min ago"). The map auto-follows you as you ride. Tap 📍 again to stop. Needs the HTTPS link (not a downloaded file) — that's a browser safety rule for GPS. 🛰️
+
+In a ride room 🏍️, your phone quietly shares your position every 12 seconds with your group (only while "broadcasting" is on), and friends' coloured dots update by themselves — even someone joining late instantly sees everyone's last-known spots. No signal in the mountains? The map shows "23 min ago" next to a rider instead of pretending — and resumes on its own when bars come back. 📡
 
 *Grown-up note: hand-built single HTML (SVG projected from real lat/lon, Dijkstra-computed hub distances). Distances ±10%; verify permits in Gangtok.*

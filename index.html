@@ -62,6 +62,19 @@
     box-shadow:0 2px 8px rgba(0,0,0,.08); display:none;}
   #locstatus b{color:#1d4ed8;}
   #locstatus .warn{color:#b45309;}
+  .rider-label{font-size:11px; font-weight:800; paint-order:stroke; stroke:#fff; stroke-width:3px;}
+  .rider-dot{stroke:#fff; stroke-width:2;}
+  #ridesec{display:none;}
+  .rider-row{display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:6px 8px;
+    border:1px solid var(--line); border-radius:8px; margin:5px 0; background:#fafafa; line-height:1.45;}
+  .rider-row .who{font-weight:700;}
+  .rider-row .meta{color:var(--muted); text-align:right;}
+  .ridebtns{display:flex; gap:6px; margin:6px 0;}
+  .ridebtns button{flex:1; padding:7px 8px; font-size:12.5px; border:1px solid var(--line); border-radius:8px;
+    background:#fff; cursor:pointer; font-weight:600;}
+  .ridebtns button:hover{background:#f3f4f6;}
+  .ridebtns button.primary{background:#7c3aed; color:#fff; border-color:#7c3aed;}
+  #ridemsg{font-size:12px; color:var(--muted); margin-top:4px; word-break:break-all;}
   .scalebox{position:absolute; bottom:14px; left:14px; background:rgba(255,255,255,.9); border:1px solid var(--line);
     border-radius:8px; padding:6px 12px; font-size:12px; color:var(--muted); z-index:10;}
   /* SVG element styles */
@@ -101,6 +114,7 @@
       <button id="zout" title="Zoom out">−</button>
       <button id="zreset" title="Reset view">⌂</button>
       <button id="locate" title="Show my live location on the map">📍</button>
+      <button id="ride" title="Ride room — share live locations with your group">🏍️</button>
     </div>
     <div id="locstatus"></div>
     <div class="scalebox">Schematic map — positions true to geography, not to scale · drag to pan · scroll to zoom</div>
@@ -133,6 +147,18 @@
       <p>Kalimpong → Lava → Loleygaon (Canopy Walk) → back via Algarah; add Gorubathan descent to the Dooars if you want a fast riverside run home along NH10.</p></div>
     <div class="route-card"><span class="km">~110 km</span><h3>5 · Nathu La Dash</h3>
       <p>Gangtok → Tsomgo Lake ◉ → Nathu La (4,310 m, Indo-China border) 🛂. Permit issued in Gangtok only; closed Mon–Tue; Indians only.</p></div>
+
+    <div id="ridesec">
+      <h2>🏍️ Ride room</h2>
+      <div class="ridebtns">
+        <button id="ridecopy">Copy invite link</button>
+        <button id="ridebc" class="primary">Start broadcasting</button>
+      </div>
+      <div id="ridemsg"></div>
+      <div id="riderlist"></div>
+      <div class="note" style="margin-top:8px">Positions relay via the public <b>ntfy.sh</b> service under this room's random code —
+        anyone with the link can watch. Codes are unguessable; still, share the link only with your group.</div>
+    </div>
 
     <h2>Permits &amp; ground rules</h2>
     <div class="note">
@@ -516,6 +542,8 @@ document.getElementById("zreset").onclick=()=>{vb={x:0,y:0,w:W,h:H}; applyVB();}
     parts.push(`${nt.km<1?(nt.km*1000).toFixed(0)+" m":nt.km.toFixed(1)+" km"} from ${nt.town.n.replace(/[◉▲✈]/g,"").trim()}`);
     if(off) parts.push(`<span class="warn">outside map area — dot pinned to edge</span>`);
     lastFix={t:Date.now(), html:parts.join(" · ")};
+    window.__skmMe={la,lo,acc:am,alt,spd:fix.coords.speed,t:Date.now()};
+    if(window.__skmFix) window.__skmFix(window.__skmMe);
     tick();
     /* follow-me: keep the view centred, preserve zoom */
     if(!off){ vb.x=x-vb.w/2; vb.y=y-vb.h/2; applyVB(); }
@@ -554,6 +582,165 @@ document.getElementById("zreset").onclick=()=>{vb={x:0,y:0,w:W,h:H}; applyVB();}
     status.style.display="none";
   }
   btn.addEventListener("click",()=>{ watchId==null?start():stop(); });
+  window.__skmLoc={start,stop,active:()=>watchId!=null,nearestTown,havKm};
+})();
+
+/* ---------------- Phase 2: shared ride room (multi-rider live map) ---------------- */
+(function(){
+  const RELAY="https://ntfy.sh";           /* free public pub-sub relay; no account */
+  const PUB_EVERY=12000;                    /* min ms between my position broadcasts */
+  const STALE_MIN=1, GONE_MIN=90;           /* label amber after 1 min, hide after 90 min */
+  const COLORS=["#e11d48","#059669","#d97706","#0891b2","#be185d","#4d7c0f","#9333ea","#b91c1c"];
+
+  const btn=document.getElementById("ride");
+  const sec=document.getElementById("ridesec");
+  const msg=document.getElementById("ridemsg");
+  const listEl=document.getElementById("riderlist");
+  const bcBtn=document.getElementById("ridebc");
+  const copyBtn=document.getElementById("ridecopy");
+
+  let room=new URLSearchParams(location.search).get("ride");
+  let myId=localStorage.getItem("skm-id");
+  if(!myId){ myId=Math.random().toString(16).slice(2,10); localStorage.setItem("skm-id",myId); }
+  let myName=localStorage.getItem("skm-name")||"";
+  let es=null, broadcasting=false, lastPub=0, pubFails=0;
+  const riders=new Map();                   /* id -> {name,la,lo,alt,spd,t,dot,lab} */
+  const riderG=g("g",{id:"riders"}); root.appendChild(riderG);
+
+  function color(id){ let h=0; for(const c of id) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length]; }
+  function roomLink(){ return `${location.origin}${location.pathname}?ride=${room}`; }
+
+  function ensureRoom(){
+    if(!room){
+      room="skm-"+crypto.getRandomValues(new Uint32Array(2)).reduce((s,v)=>s+v.toString(16).padStart(8,"0"),"");
+      history.replaceState(null,"",`${location.pathname}?ride=${room}`);
+    }
+  }
+  function ensureName(){
+    while(!myName){ myName=(prompt("Your rider name (shown to the group):")||"").trim().slice(0,16); }
+    localStorage.setItem("skm-name",myName);
+  }
+
+  /* ---- subscribe: EventSource with 12h replay so late joiners get last-known dots ---- */
+  function subscribe(){
+    if(es) es.close();
+    es=new EventSource(`${RELAY}/${room}/sse?since=12h`);
+    es.onmessage=ev=>{
+      try{
+        const env=JSON.parse(ev.data);
+        if(!env.message) return;
+        const p=JSON.parse(env.message);
+        if(!p.id||typeof p.la!=="number"||typeof p.lo!=="number") return;
+        if(p.id===myId) return;                       /* my own dot is the blue YOU */
+        const prev=riders.get(p.id);
+        if(prev && prev.t>=p.t) return;               /* replay can arrive out of order */
+        upsert(p);
+      }catch(e){}
+    };
+    es.onerror=()=>{ msg.textContent="relay reconnecting… (positions resume automatically)"; };
+    es.onopen=()=>{ renderMsg(); };
+  }
+
+  function upsert(p){
+    let r=riders.get(p.id);
+    if(!r){
+      const c=color(p.id);
+      r={dot:g("circle",{class:"rider-dot",r:6.5,fill:c}), lab:g("text",{class:"rider-label",fill:c})};
+      r.dot.style.cursor="pointer";
+      riderG.appendChild(r.dot); riderG.appendChild(r.lab);
+      riders.set(p.id,r);
+    }
+    Object.assign(r,p);
+    let x=px(p.lo), y=py(p.la);
+    x=Math.max(PAD,Math.min(W-PAD,x)); y=Math.max(PAD,Math.min(H-PAD,y));
+    r.dot.setAttribute("cx",x); r.dot.setAttribute("cy",y);
+    r.lab.setAttribute("x",x+10); r.lab.setAttribute("y",y+4);
+    r.lab.textContent=p.name||p.id;
+    r.dot.onmousemove=ev=>{
+      const nt=window.__skmLoc.nearestTown(p.la,p.lo);
+      showTip(ev,`🏍️ ${p.name||p.id}`,`${age(p.t)} · ${nt.km.toFixed(1)} km from ${nt.town.n.replace(/[◉▲✈]/g,"").trim()}${p.alt?` · alt ${Math.round(p.alt)} m`:""}`);
+    };
+    r.dot.onmouseleave=hideTip;
+    renderList();
+  }
+
+  function age(t){ const s=Math.round((Date.now()-t)/1000);
+    return s<20?"live":s<60?`${s}s ago`:s<3600?`${Math.round(s/60)} min ago`:`${(s/3600).toFixed(1)} h ago`; }
+
+  function renderList(){
+    const rows=[...riders.values()].sort((a,b)=>b.t-a.t).map(r=>{
+      const mins=(Date.now()-r.t)/60000;
+      if(mins>GONE_MIN){ r.dot.style.display="none"; r.lab.style.display="none"; return ""; }
+      const fade=Math.max(.35,1-mins/GONE_MIN);
+      r.dot.style.opacity=fade; r.lab.style.opacity=fade;
+      const nt=window.__skmLoc.nearestTown(r.la,r.lo);
+      const me=window.__skmMe;
+      const dist=me?` · ${window.__skmLoc.havKm(me.la,me.lo,r.la,r.lo).toFixed(1)} km from you`:"";
+      return `<div class="rider-row"><span class="who" style="color:${color(r.id)}">● ${r.name||r.id}</span>
+        <span class="meta">${age(r.t)}<br>near ${nt.town.n.replace(/[◉▲✈]/g,"").trim()}${dist}</span></div>`;
+    }).join("");
+    listEl.innerHTML=rows||'<div id="ridemsg">no riders seen yet — send the invite link</div>';
+  }
+
+  /* ---- publish my fixes ---- */
+  async function publish(me){
+    if(!broadcasting||!room) return;
+    const now=Date.now();
+    if(now-lastPub<PUB_EVERY) return;
+    lastPub=now;
+    const body=JSON.stringify({id:myId,name:myName,la:+me.la.toFixed(5),lo:+me.lo.toFixed(5),
+      alt:me.alt?Math.round(me.alt):null,spd:me.spd?Math.round(me.spd*3.6):null,t:now});
+    try{
+      await fetch(`${RELAY}/${room}`,{method:"POST",body,signal:AbortSignal.timeout(10000)});
+      pubFails=0; renderMsg();
+    }catch(e){ pubFails++; if(pubFails>2) msg.textContent="⚠ no signal — will resume broadcasting when network returns"; }
+  }
+  window.__skmFix=publish;
+
+  function renderMsg(){
+    msg.innerHTML=`room <b>${room}</b> · ${broadcasting?"broadcasting every "+(PUB_EVERY/1000)+"s":"watching only"} · invite: ${roomLink()}`;
+  }
+
+  /* ---- controls ---- */
+  function openRoom(){
+    ensureRoom();
+    sec.style.display="block";
+    btn.classList.add("active");
+    subscribe();
+    renderMsg(); renderList();
+  }
+  btn.addEventListener("click",()=>{
+    if(sec.style.display==="block"){ /* leave room */
+      if(es) es.close(); es=null; broadcasting=false;
+      bcBtn.textContent="Start broadcasting"; bcBtn.classList.add("primary");
+      sec.style.display="none"; btn.classList.remove("active");
+      return;
+    }
+    openRoom();
+  });
+  bcBtn.addEventListener("click",()=>{
+    if(!broadcasting){
+      ensureName();
+      broadcasting=true; lastPub=0;
+      if(!window.__skmLoc.active()) window.__skmLoc.start();
+      bcBtn.textContent="Stop broadcasting"; bcBtn.classList.remove("primary");
+    }else{
+      broadcasting=false;
+      bcBtn.textContent="Start broadcasting"; bcBtn.classList.add("primary");
+    }
+    renderMsg();
+  });
+  copyBtn.addEventListener("click",async()=>{
+    ensureRoom(); renderMsg();
+    try{ await navigator.clipboard.writeText(roomLink()); copyBtn.textContent="Copied ✓"; }
+    catch(e){ prompt("Copy this invite link:",roomLink()); }
+    setTimeout(()=>copyBtn.textContent="Copy invite link",1500);
+  });
+
+  setInterval(()=>{ if(sec.style.display==="block") renderList(); },5000);
+
+  /* arrived via an invite link → auto-open the room in watch mode */
+  if(room) openRoom();
 })();
 </script>
 </body>
