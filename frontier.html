@@ -57,6 +57,13 @@
   .ctrl button.active{background:#ccfbf1; border-color:#0f766e; box-shadow:0 0 0 2px rgba(15,118,110,.25);}
   .scalebox{position:absolute; bottom:12px; left:12px; background:rgba(255,255,255,.92); border:1px solid var(--line);
     border-radius:8px; padding:5px 11px; font-size:11.5px; color:var(--muted); z-index:10;}
+  .basebar{position:absolute; top:12px; left:50%; transform:translateX(-50%); display:flex; z-index:10;
+    background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.08);}
+  .basebar button{padding:7px 16px; font-size:12.5px; font-weight:700; border:none; background:#fff; cursor:pointer; color:var(--muted);}
+  .basebar button+button{border-left:1px solid var(--line);}
+  .basebar button.on{background:#0f766e; color:#fff;}
+  #tilewarn{position:absolute; top:52px; left:50%; transform:translateX(-50%); z-index:10; font-size:11.5px;
+    background:#fff8e6; border:1px solid #fde68a; color:#92400e; border-radius:8px; padding:4px 10px; display:none;}
   #sbar{display:inline-block; height:4px; background:#374151; vertical-align:middle; margin-right:6px; border-radius:2px;}
   #locstatus{position:absolute; bottom:12px; right:12px; background:rgba(255,255,255,.95); border:1px solid var(--line);
     border-radius:8px; padding:6px 11px; font-size:12px; z-index:10; max-width:330px; line-height:1.5;
@@ -99,9 +106,15 @@
       <button id="locate" title="Show my live location">📍</button>
       <button id="ride" title="Convoy room — share live locations">🏍️</button>
     </div>
+    <div class="basebar">
+      <button id="b-schematic" class="on">Schematic</button>
+      <button id="b-terrain">Terrain</button>
+      <button id="b-sat">Satellite</button>
+    </div>
+    <div id="tilewarn">tiles unreachable — check internet; schematic still works</div>
     <div id="measurebox">route: <b id="mkm">0.0 km</b> <span id="mpts"></span><button id="mundo">undo</button><button id="mclear">clear</button></div>
     <div id="locstatus"></div>
-    <div class="scalebox"><span id="sbar"></span><span id="stxt"></span> · Web-Mercator, real OSM geometry · drag to pan · scroll to zoom</div>
+    <div class="scalebox"><span id="sbar"></span><span id="stxt"></span> · <span id="attrib">Web-Mercator, real OSM geometry</span> · drag to pan · scroll to zoom</div>
   </div>
 
   <aside class="side">
@@ -207,13 +220,54 @@ const kmPerUnit=()=>Math.cos(latAt(view.y)*R2);
 
 let hover=null, me=null, riders=null;
 
+/* ---------------- tile base layers (Phase B) ---------------- */
+let base="schematic";
+const TILESRC={
+  terrain:{url:(z,x,y)=>`https://${"abc"[(x+y)%3]}.tile.opentopomap.org/${z}/${x}/${y}.png`,
+           max:17, attrib:"Tiles © OpenTopoMap (CC-BY-SA) · data © OSM"},
+  sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+       max:17, attrib:"Imagery © Esri, Maxar, Earthstar Geographics"},
+};
+const tileCache=new Map(); let tileFails=0;      /* key -> {img,ok,err} ; LRU-capped */
+const WORLD=2*Math.PI*RE;                         /* mercator world width in km units */
+function tileZ(){ const src=TILESRC[base]; return Math.max(1,Math.min(src.max,Math.round(Math.log2(view.z*WORLD/256)))); }
+function getTile(z,x,y){
+  const n=1<<z; if(y<0||y>=n) return null; x=((x%n)+n)%n;
+  const key=base+"/"+z+"/"+x+"/"+y;
+  let t=tileCache.get(key);
+  if(t) return t;
+  if(tileCache.size>420){ const k=tileCache.keys().next().value; tileCache.delete(k); }
+  t={img:new Image(),ok:false,err:false};
+  t.img.onload=()=>{t.ok=true; tileFails=0; document.getElementById("tilewarn").style.display="none"; draw();};
+  t.img.onerror=()=>{t.err=true; if(++tileFails>8) document.getElementById("tilewarn").style.display="block";};
+  t.img.src=TILESRC[base].url(z,x,y);
+  tileCache.set(key,t);
+  return t;
+}
+function drawTiles(){
+  const z=tileZ(), n=1<<z, T=WORLD/n;              /* tile size in world units */
+  const wx0=ix(0)+WORLD/2, wy0=iy(0)+WORLD/2;      /* shift origin to world corner */
+  const wx1=ix(W)+WORLD/2, wy1=iy(H)+WORLD/2;
+  const tx0=Math.floor(wx0/T), tx1=Math.floor(wx1/T);
+  const ty0=Math.floor(wy0/T), ty1=Math.floor(wy1/T);
+  ctx.imageSmoothingEnabled=true;
+  for(let ty=ty0;ty<=ty1;ty++) for(let tx=tx0;tx<=tx1;tx++){
+    const t=getTile(z,tx,ty); if(!t||!t.ok) continue;
+    const X=sx(tx*T-WORLD/2), Y=sy(ty*T-WORLD/2), S=T*view.z;
+    ctx.drawImage(t.img,X,Y,S+0.6,S+0.6);
+  }
+  if(base==="terrain"){ ctx.fillStyle="rgba(255,255,255,.22)"; ctx.fillRect(0,0,W,H); }
+}
+
 function draw(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,W,H);
+  const overTiles = base!=="schematic";
   /* study bbox */
   const x0=sx(wx(DATA.bbox[1])),y0=sy(wy(DATA.bbox[2])),x1=sx(wx(DATA.bbox[3])),y1=sy(wy(DATA.bbox[0]));
-  ctx.fillStyle="#eef4ea"; ctx.fillRect(x0,y0,x1-x0,y1-y0);
-  ctx.setLineDash([6,5]); ctx.strokeStyle="#c8d4bf"; ctx.lineWidth=1.5; ctx.strokeRect(x0,y0,x1-x0,y1-y0); ctx.setLineDash([]);
+  if(!overTiles){ ctx.fillStyle="#eef4ea"; ctx.fillRect(x0,y0,x1-x0,y1-y0); }
+  else drawTiles();
+  ctx.setLineDash([6,5]); ctx.strokeStyle=overTiles?"#475569":"#c8d4bf"; ctx.lineWidth=1.5; ctx.strokeRect(x0,y0,x1-x0,y1-y0); ctx.setLineDash([]);
   /* neighbour labels */
   ctx.textBaseline="middle";
   label("NEPAL →",x0+14,(y0+y1)/2,"#9ca3af","800 13px");
@@ -225,8 +279,9 @@ function draw(){
   for(const cls of ORDER){
     if(!show[cls]) continue;
     const s=CLS[cls];
-    if(s.casing&&view.z>4){ctx.strokeStyle=s.casing;ctx.lineWidth=(s.w+2.4)/view.z;ctx.setLineDash([]);ctx.stroke(paths[cls]);}
-    ctx.strokeStyle=s.c; ctx.lineWidth=s.w/view.z;
+    if(overTiles){ ctx.strokeStyle="rgba(255,255,255,.9)"; ctx.lineWidth=(s.w+2.6)/view.z; ctx.setLineDash([]); ctx.stroke(paths[cls]); }
+    else if(s.casing&&view.z>4){ctx.strokeStyle=s.casing;ctx.lineWidth=(s.w+2.4)/view.z;ctx.setLineDash([]);ctx.stroke(paths[cls]);}
+    ctx.strokeStyle=s.c; ctx.lineWidth=(overTiles?s.w+0.5:s.w)/view.z;
     ctx.setLineDash(s.dash?s.dash.map(d=>d/view.z*3):[]);
     ctx.stroke(paths[cls]);
   }
@@ -365,6 +420,17 @@ function fitView(){
 document.getElementById("zreset").onclick=()=>{fitView();draw();};
 document.querySelectorAll(".legend-item input").forEach(cb=>{
   cb.addEventListener("change",()=>{show[cb.dataset.cls]=cb.checked?1:0;draw();});
+});
+/* base layer switch */
+const ATTRIB_DEFAULT="Web-Mercator, real OSM geometry";
+[["b-schematic","schematic"],["b-terrain","terrain"],["b-sat","sat"]].forEach(([id,mode])=>{
+  document.getElementById(id).addEventListener("click",()=>{
+    base=mode; tileFails=0;
+    document.querySelectorAll(".basebar button").forEach(b=>b.classList.toggle("on",b.id===id));
+    document.getElementById("attrib").textContent = mode==="schematic"?ATTRIB_DEFAULT:TILESRC[mode].attrib;
+    document.getElementById("tilewarn").style.display="none";
+    draw();
+  });
 });
 
 /* ---------------- measure (haversine over tapped lat/lon) ---------------- */

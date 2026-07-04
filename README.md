@@ -3,7 +3,7 @@
 **What we built:** a single-file interactive road map of Sikkim + Kalimpong — like a treasure map for motorbikes. Every rideable road is drawn and colour-coded (orange = National Highway, blue = State Highway, green = village road, red-dashed = broken high-altitude track), with distances in km on every segment.
 
 **View it:** https://dtensor.github.io/sikkim-bike-map/
-**Frontier map (NEW):** https://dtensor.github.io/sikkim-bike-map/frontier.html — Nepal border to Bhutan border, Kalimpong to beyond Donkya La: 17,826 real OSM ways (16,204 km, incl 2,751 km walking trails), 111 viewpoints, 10 passes, 202 peaks, international borders, 11 permit/army gates, convoy rooms. Web-Mercator engine ready for terrain/satellite layers (Phase B).
+**Frontier map (NEW):** https://dtensor.github.io/sikkim-bike-map/frontier.html — Nepal border to Bhutan border, Kalimpong to beyond Donkya La: 17,826 real OSM ways (16,204 km, incl 2,751 km walking trails), 111 viewpoints, 10 passes, 202 peaks, international borders, 11 permit/army gates, convoy rooms. Toggle **Schematic / Terrain / Satellite** base layers (OpenTopoMap contours + Esri imagery stream in live; schematic works offline).
 **Trail map:** https://dtensor.github.io/sikkim-bike-map/kalimpong.html — every small road, jeep track and walking trail within 40 km of Kalimpong (19,907 real OSM ways, ~14,000 km), with 73 ★ viewpoints, a tap-to-measure ruler ⌁ for exact route distances, and the same 📍 live location + 🏍️ ride rooms.
 
 ## How I use it
