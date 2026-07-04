@@ -75,7 +75,9 @@
   #measurebox button{margin-left:8px; font-size:11px; border:1px solid var(--line); background:#fff; border-radius:6px; padding:2px 8px; cursor:pointer;}
   #ridesec{display:none;}
   .rider-row{display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:5px 8px;
-    border:1px solid var(--line); border-radius:8px; margin:5px 0; background:#fafafa; line-height:1.45;}
+    border:1px solid var(--line); border-radius:8px; margin:5px 0; background:#fafafa; line-height:1.45; cursor:pointer;}
+  .rider-row:hover{background:#f0fdfa;}
+  .rider-row.followed{border-color:#0f766e; background:#ccfbf1;}
   .rider-row .who{font-weight:700;} .rider-row .meta{color:var(--muted); text-align:right;}
   .ridebtns{display:flex; gap:6px; margin:6px 0;}
   .ridebtns button{flex:1; padding:6px 8px; font-size:12px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-weight:600;}
@@ -218,7 +220,7 @@ const ix=px=>view.x+(px-W/2)/view.z, iy=py=>view.y+(py-H/2)/view.z;
 const latAt=y=>Math.atan(Math.sinh(-y/RE))/R2;
 const kmPerUnit=()=>Math.cos(latAt(view.y)*R2);
 
-let hover=null, me=null, riders=null;
+let hover=null, me=null, riders=null, followId=null, myTrail=[];
 
 /* ---------------- tile base layers (Phase B) ---------------- */
 let base="schematic";
@@ -293,7 +295,7 @@ function draw(){
     ctx.stroke();
   }
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  drawPois(); drawMeasure(); drawRiders(); drawMe(); drawScale();
+  drawPois(); drawKmPosts(); drawMeasure(); drawRiders(); drawMe(); drawScale();
 }
 
 function drawPois(){
@@ -515,6 +517,7 @@ let pulseR=9;
 setInterval(()=>{pulseR=pulseR>=22?9:pulseR+1.3;if(me)draw();},90);
 function drawMe(){
   if(!me)return;
+  drawTrail(myTrail,"#2563eb");
   const X=sx(me.x),Y=sy(me.y);
   if(me.acc){ctx.fillStyle="rgba(59,130,246,.10)";ctx.strokeStyle="rgba(59,130,246,.4)";ctx.setLineDash([5,4]);
     ctx.beginPath();ctx.arc(X,Y,Math.min(120,me.acc/1000/kmPerUnit()*view.z),0,7);ctx.fill();ctx.stroke();ctx.setLineDash([]);}
@@ -523,6 +526,62 @@ function drawMe(){
   ctx.fillStyle="#2563eb";ctx.beginPath();ctx.arc(X,Y,7,0,7);ctx.fill();
   ctx.strokeStyle="#fff";ctx.lineWidth=2.5;ctx.stroke();
   label("YOU",X+12,Y,"#1d4ed8","800 11px");
+}
+
+/* ---------------- axes & km-posts (Phase C) ---------------- */
+const AXES=[
+ {name:"North axis",wps:[["Gangtok",27.33,88.61],["Kabi",27.42,88.60],["Phodong",27.47,88.58],["Mangan",27.51,88.53],["Toong",27.56,88.61],["Chungthang",27.60,88.64],["Lachung",27.69,88.74],["Yumthang",27.82,88.70],["Yumesamdong",27.90,88.74]]},
+ {name:"Gurudongmar arm",wps:[["Chungthang",27.60,88.64],["Lachen",27.72,88.55],["Thangu",27.90,88.53],["Gurudongmar",28.02,88.71]]},
+ {name:"Nathu La axis",wps:[["Gangtok",27.33,88.61],["3rd Mile",27.35,88.66],["Tsomgo",27.37,88.76],["Nathu La",27.39,88.84]]},
+ {name:"Silk Route loop",wps:[["Kupup",27.34,88.83],["Nathang",27.29,88.80],["Zuluk",27.25,88.78],["Rongli",27.22,88.69]]},
+ {name:"NH10 axis",wps:[["Kalimpong",27.06,88.47],["Teesta Bazaar",27.08,88.43],["Melli",27.09,88.44],["Rangpo",27.18,88.53],["Singtam",27.23,88.50],["Ranipool",27.29,88.59],["Gangtok",27.33,88.61]]},
+];
+const kmPosts=[];
+for(const ax of AXES){
+  ax.cum=[0];
+  for(let i=1;i<ax.wps.length;i++)
+    ax.cum.push(ax.cum[i-1]+havKm(ax.wps[i-1][1],ax.wps[i-1][2],ax.wps[i][1],ax.wps[i][2]));
+  for(let km=10;km<ax.cum[ax.cum.length-1];km+=10){
+    let i=1; while(ax.cum[i]<km)i++;
+    const f=(km-ax.cum[i-1])/(ax.cum[i]-ax.cum[i-1]);
+    const la=ax.wps[i-1][1]+f*(ax.wps[i][1]-ax.wps[i-1][1]);
+    const lo=ax.wps[i-1][2]+f*(ax.wps[i][2]-ax.wps[i-1][2]);
+    kmPosts.push({la,lo,x:wx(lo),y:wy(la),km,axis:ax.name});
+  }
+}
+/* nearest axis + along-km for a position; null if >3 km off every axis */
+function axisInfo(la,lo){
+  const kx=111.32*Math.cos(la*R2), ky=111.32;
+  let best=null;
+  for(const ax of AXES){
+    for(let i=1;i<ax.wps.length;i++){
+      const [_,la1,lo1]=ax.wps[i-1],[__,la2,lo2]=ax.wps[i];
+      const ax_=(lo1-lo)*kx, ay=(la1-la)*ky, bx=(lo2-lo)*kx, by=(la2-la)*ky;
+      const dx=bx-ax_, dy=by-ay;
+      const t=Math.max(0,Math.min(1,-(ax_*dx+ay*dy)/(dx*dx+dy*dy||1e-12)));
+      const px_=ax_+t*dx, py_=ay+t*dy;
+      const d=Math.hypot(px_,py_);
+      if(!best||d<best.d){
+        const along=ax.cum[i-1]+t*(ax.cum[i]-ax.cum[i-1]);
+        let ni=i; while(ni<ax.wps.length&&ax.cum[ni]<along+0.1)ni++;
+        best={d,ax,along,next:ni<ax.wps.length?{name:ax.wps[ni][0],km:ax.cum[ni]-along}:null};
+      }
+    }
+  }
+  if(!best||best.d>3) return null;
+  let s=`${best.ax.name} · km ${best.along.toFixed(0)}`;
+  if(best.next) s+=` · ${best.next.km.toFixed(0)} km to ${best.next.name}`;
+  return s;
+}
+function drawKmPosts(){
+  if(!show.gt||view.z<10) return;
+  for(const p of kmPosts){
+    const X=sx(p.x),Y=sy(p.y);
+    if(X<-20||X>W+20||Y<-20||Y>H+20) continue;
+    ctx.fillStyle="#0f766e";
+    ctx.beginPath(); ctx.moveTo(X,Y-4); ctx.lineTo(X+4,Y); ctx.lineTo(X,Y+4); ctx.lineTo(X-4,Y); ctx.closePath(); ctx.fill();
+    if(view.z>25) label(String(p.km),X+6,Y,"#0f766e","700 10px");
+  }
 }
 
 /* ---------------- convoy room ---------------- */
@@ -549,10 +608,18 @@ function drawMe(){
     es.onmessage=ev=>{try{
       const env=JSON.parse(ev.data); if(!env.message)return;
       const p=JSON.parse(env.message);
-      if(!p.id||typeof p.la!=="number"||typeof p.lo!=="number")return;
+      if(!p.id||typeof p.la!=="number"||typeof p.lo!=="number"||typeof p.t!=="number")return;
       if(p.id===myId)return;
-      const prev=rmap.get(p.id); if(prev&&prev.t>=p.t)return;
-      rmap.set(p.id,{...p,x:wx(p.lo),y:wy(p.la),col:color(p.id)});
+      let r=rmap.get(p.id);
+      if(!r){ r={id:p.id,col:color(p.id),trail:[],t:0}; rmap.set(p.id,r); }
+      /* breadcrumb: keep every distinct fix, tolerate out-of-order replay */
+      if(!r.trail.some(q=>q.t===p.t)){
+        r.trail.push({x:wx(p.lo),y:wy(p.la),la:p.la,lo:p.lo,t:p.t});
+        if(r.trail.length>1&&r.trail[r.trail.length-2].t>p.t) r.trail.sort((a,b)=>a.t-b.t);
+        if(r.trail.length>4000) r.trail.splice(0,r.trail.length-4000);
+      }
+      if(p.t>=r.t){ Object.assign(r,p,{x:wx(p.lo),y:wy(p.la)});
+        if(followId===r.id){ view.x=r.x; view.y=r.y; } }
       renderList(); draw();
     }catch(e){}};
     es.onerror=()=>{msg.textContent="relay reconnecting…";};
@@ -560,20 +627,41 @@ function drawMe(){
   }
   const age=t=>{const s=Math.round((Date.now()-t)/1000);
     return s<20?"live":s<60?`${s}s ago`:s<3600?`${Math.round(s/60)} min ago`:`${(s/3600).toFixed(1)} h ago`;};
+  function speedKmh(r){
+    const n=r.trail.length; if(n<2)return null;
+    const a=r.trail[n-2],b=r.trail[n-1],dt=(b.t-a.t)/3600000;
+    if(dt<=0||dt>0.5)return null;
+    const v=havKm(a.la,a.lo,b.la,b.lo)/dt;
+    return v>250?null:v;   /* GPS glitch guard */
+  }
   function renderList(){
     listEl.innerHTML=[...rmap.values()].sort((a,b)=>b.t-a.t).map(r=>{
       if((Date.now()-r.t)/60000>GONE_MIN)return "";
       const np=nearestPlace(r.la,r.lo),m=window.__skmMe;
       const dist=m?` · ${havKm(m.la,m.lo,r.la,r.lo).toFixed(1)} km from you`:"";
-      return `<div class="rider-row"><span class="who" style="color:${r.col}">● ${r.name||r.id}</span>
-        <span class="meta">${age(r.t)}${np.p?`<br>near ${np.p.name}`:""}${dist}</span></div>`;
+      const ax=axisInfo(r.la,r.lo);
+      const sp=speedKmh(r);
+      return `<div class="rider-row${followId===r.id?" followed":""}" data-rid="${r.id}">
+        <span class="who" style="color:${r.col}">● ${r.name||r.id}${followId===r.id?" ⌖":""}</span>
+        <span class="meta">${age(r.t)}${sp!=null?` · ${sp.toFixed(0)} km/h`:""}${np.p?`<br>near ${np.p.name}`:""}${dist}${ax?`<br>${ax}`:""}</span></div>`;
     }).join("")||'<div id="ridemsg">no units yet — send the invite link</div>';
   }
+  /* follow mode: click a unit row to track it; click again to release */
+  listEl.addEventListener("click",ev=>{
+    const row=ev.target.closest("[data-rid]"); if(!row)return;
+    const id=row.dataset.rid;
+    followId = followId===id?null:id;
+    const r=rmap.get(followId);
+    if(r){ view.x=r.x; view.y=r.y; if(view.z<40)view.z=60; }
+    renderList(); draw();
+  });
   async function publish(m){
     if(!broadcasting||!room)return;
     const now=Date.now(); if(now-lastPub<PUB_EVERY)return; lastPub=now;
     const body=JSON.stringify({id:myId,name:myName,la:+m.la.toFixed(5),lo:+m.lo.toFixed(5),
       alt:m.alt?Math.round(m.alt):null,t:now});
+    myTrail.push({x:wx(m.lo),y:wy(m.la),t:now});
+    if(myTrail.length>4000)myTrail.splice(0,myTrail.length-4000);
     try{await fetch(`${RELAY}/${room}`,{method:"POST",body,signal:AbortSignal.timeout(10000)});pubFails=0;renderMsg();}
     catch(e){pubFails++;if(pubFails>2)msg.textContent="⚠ no signal — resumes when network returns";}
   }
@@ -602,13 +690,35 @@ function drawMe(){
   setInterval(()=>{if(sec.style.display==="block"){renderList();draw();}},5000);
   if(room)openRoom();
 })();
+function drawTrail(trail,col){
+  if(trail.length<2)return;
+  const cut=Date.now()-12*3600000;
+  ctx.strokeStyle=col; ctx.lineCap="round";
+  /* older half faint, last 30 min bold */
+  const recent=Date.now()-30*60000;
+  for(const pass of [[0.3,2,t=>t.t<recent],[0.85,3.5,t=>t.t>=recent]]){
+    ctx.globalAlpha=pass[0]; ctx.lineWidth=pass[1];
+    ctx.beginPath(); let pen=false;
+    for(let i=0;i<trail.length;i++){
+      const p=trail[i];
+      if(p.t<cut||!pass[2](p)){pen=false;continue;}
+      const X=sx(p.x),Y=sy(p.y);
+      if(!pen){ctx.moveTo(X,Y);pen=true;}else ctx.lineTo(X,Y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+}
 function drawRiders(){
   if(!riders)return;
   for(const r of riders.values()){
-    const mins=(Date.now()-r.t)/60000; if(mins>90)continue;
+    const mins=(Date.now()-r.t)/60000; if(mins>90&&followId!==r.id)continue;
+    drawTrail(r.trail||[],r.col);
     const fade=Math.max(.35,1-mins/90);
     const X=sx(r.x),Y=sy(r.y);
-    ctx.globalAlpha=fade;
+    ctx.globalAlpha=Math.max(.35,fade);
+    if(followId===r.id){ ctx.strokeStyle=r.col; ctx.lineWidth=2; ctx.setLineDash([4,3]);
+      ctx.beginPath(); ctx.arc(X,Y,13,0,7); ctx.stroke(); ctx.setLineDash([]); }
     ctx.fillStyle=r.col;ctx.beginPath();ctx.arc(X,Y,6.5,0,7);ctx.fill();
     ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.stroke();
     label(r.name||r.id,X+10,Y,r.col,"800 11px");
