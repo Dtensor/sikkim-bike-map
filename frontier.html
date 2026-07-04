@@ -141,6 +141,16 @@
       <div id="riderlist"></div>
     </div>
 
+    <h2>Export</h2>
+    <div class="ridebtns">
+      <button id="expkml" title="Everything currently visible (layer checkboxes respected) as KML — open in Google Earth for 3D terrain + satellite flythroughs">Google Earth KML</button>
+      <button id="expgpx" title="The route you tapped out with the ruler, as GPX for a handlebar GPS">Ruler route GPX</button>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:2px">
+      KML exports the <b>visible layers</b> (untick village roads for a lean file) plus convoy trails if a room is open.
+      GPX exports the ⌁ measured route. Open KML in Google Earth Pro for native 3D terrain.
+    </div>
+
     <h2>The great axes</h2>
     <div class="route-card"><span class="km">~200 km</span><h3><span class="c">AXIS</span> · North: Gangtok → Donkya La</h3>
       <p>Gangtok → Kabi → Mangan ⛽🛂 → Toong → Chungthang → Lachung → Yumthang → Yumesamdong (Zero Point). Donkya La (5,432 m) is ~8 km beyond — army-controlled, normally closed to civilians; the map shows the axis to the gate.</p></div>
@@ -725,6 +735,88 @@ function drawRiders(){
     ctx.globalAlpha=1;
   }
 }
+
+/* ---------------- Phase D: KML / GPX export ---------------- */
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function buildKML(){
+  const K=[`<?xml version="1.0" encoding="UTF-8"?>`,
+   `<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>North Frontier Atlas</name>`,
+   `<description>Kalimpong to Donkya La — cycling, trails, convoy. Geometry (c) OpenStreetMap contributors (ODbL).</description>`];
+  const STY={nh:["ff0c59e8",4],sh:["ffc27119",3],mr:["ff0d945c",2],tk:["ff2c5aa0",2.5],tr:["ffb5369c",2.5],bd:["ff1c1cb9",3]};
+  for(const k in STY) K.push(`<Style id="${k}"><LineStyle><color>${STY[k][0]}</color><width>${STY[k][1]}</width></LineStyle></Style>`);
+  K.push(`<Style id="poi"><IconStyle><scale>0.9</scale></IconStyle></Style>`);
+  const FNAME={nh:"Highways",sh:"Connector roads",mr:"Village and minor roads",tk:"Jeep tracks",tr:"Walking trails"};
+  for(const cls of ORDER){
+    if(!show[cls]) continue;
+    K.push(`<Folder><name>${FNAME[cls]}</name>`);
+    for(const w of DATA.ways){
+      if(w[0]!==cls) continue;
+      const nm=w[1]||FNAME[cls], desc=`${w[3]} km${w[2]?" · "+w[2]:""}`;
+      const coords=w[4].map(p=>`${p[1]},${p[0]},0`).join(" ");
+      K.push(`<Placemark><name>${esc(nm)}</name><description>${esc(desc)}</description><styleUrl>#${cls}</styleUrl><LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString></Placemark>`);
+    }
+    K.push(`</Folder>`);
+  }
+  if(show.bd){
+    K.push(`<Folder><name>International borders</name>`);
+    for(const b of DATA.borders){
+      const coords=b.map(p=>`${p[1]},${p[0]},0`).join(" ");
+      K.push(`<Placemark><styleUrl>#bd</styleUrl><LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString></Placemark>`);
+    }
+    K.push(`</Folder>`);
+  }
+  const groups=[["vp","Viewpoints",p=>show.vp],["pk","Peaks",p=>show.vp],["pa","Mountain passes",p=>show.vp],
+                ["gt","Permit and army gates (approx.)",p=>show.gt],["tw","Towns",p=>show.pl],["vl","Villages",p=>show.pl],["fu","Fuel",p=>true]];
+  for(const [kind,fname,vis] of groups){
+    if(!vis()) continue;
+    const items=pois.filter(p=>p.k===kind&&p.name);
+    if(!items.length) continue;
+    K.push(`<Folder><name>${fname}</name>`);
+    for(const p of items)
+      K.push(`<Placemark><name>${esc(p.name)}</name><description>${KIND[p.k]}${p.ele?" · "+esc(p.ele)+" m":""}</description><styleUrl>#poi</styleUrl><Point><coordinates>${p.lo},${p.la},0</coordinates></Point></Placemark>`);
+    K.push(`</Folder>`);
+  }
+  if(show.gt&&kmPosts.length){
+    K.push(`<Folder><name>Axis km-posts (10 km, chord-approx)</name>`);
+    for(const p of kmPosts)
+      K.push(`<Placemark><name>${esc(p.axis)} km ${p.km}</name><styleUrl>#poi</styleUrl><Point><coordinates>${p.lo},${p.la},0</coordinates></Point></Placemark>`);
+    K.push(`</Folder>`);
+  }
+  if(riders&&riders.size){
+    K.push(`<Folder><name>Convoy trails (this session)</name>`);
+    for(const r of riders.values()){
+      if(!r.trail||r.trail.length<2) continue;
+      const coords=r.trail.map(p=>`${p.lo},${p.la},0`).join(" ");
+      K.push(`<Placemark><name>${esc(r.name||r.id)}</name><styleUrl>#tk</styleUrl><LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString></Placemark>`);
+    }
+    K.push(`</Folder>`);
+  }
+  K.push(`</Document></kml>`);
+  return K.join("\n");
+}
+function buildGPX(){
+  if(mPts.length<2) return null;
+  const G=[`<?xml version="1.0" encoding="UTF-8"?>`,
+   `<gpx version="1.1" creator="North Frontier Atlas" xmlns="http://www.topografix.com/GPX/1/1">`,
+   `<trk><name>Frontier ruler route (${mLen().toFixed(1)} km)</name><trkseg>`];
+  for(const p of mPts) G.push(`<trkpt lat="${p.la.toFixed(6)}" lon="${p.lo.toFixed(6)}"></trkpt>`);
+  G.push(`</trkseg></trk></gpx>`);
+  return G.join("\n");
+}
+function download(name,text,mime){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([text],{type:mime}));
+  a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+document.getElementById("expkml").addEventListener("click",()=>{
+  download("north-frontier-atlas.kml",buildKML(),"application/vnd.google-earth.kml+xml");
+});
+document.getElementById("expgpx").addEventListener("click",()=>{
+  const g=buildGPX();
+  if(!g){ alert("Tap out a route first: press ⌁ then click points along your planned line."); return; }
+  download("frontier-route.gpx",g,"application/gpx+xml");
+});
 
 /* ---------------- boot ---------------- */
 window.addEventListener("resize",resize);
